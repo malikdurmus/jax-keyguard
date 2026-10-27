@@ -1,59 +1,60 @@
 # jax-keyguard
 
-Detect JAX PRNG key reuse at runtime, for both typed keys (`jax.random.key`)
-and legacy raw `uint32` keys (`jax.random.PRNGKey`).
+Find JAX PRNG key reuse — the bug you get when you forget to split a key.
 
 ```python
 import jax
-from jax_keyguard import key_reuse_guard, KeyReuseError
 
-key = jax.random.PRNGKey(0)
-with key_reuse_guard():
-    x = jax.random.normal(key, (3,))
-    y = jax.random.uniform(key, (3,))  # raises KeyReuseError
+def train(key, steps):
+    for _ in range(steps):
+        noise = jax.random.normal(key, (3,))  # same noise every step
 ```
 
 ```
-KeyReuseError: jax.random.uniform received a PRNG key that was already consumed
-by jax.random.normal at /path/to/script.py:6. Split the key and use each subkey only once.
+$ jax-keyguard src/
+src/train.py:5:35: KG001 PRNG key 'key' reused: already consumed by jax.random.normal in a previous iteration; split it first
 ```
 
 Install: `pip install jax-keyguard` (Python >= 3.10).
 
-## Why
+It works in two ways. Use the static checker everywhere and the runtime check
+in tests for what static analysis can't see.
 
-JAX has a built-in checker, `jax.config.update("jax_debug_key_reuse", True)`,
-but it only tracks typed keys. Raw keys from `jax.random.PRNGKey`, which much
-existing code still uses, are silently ignored (verified on JAX 0.12.0.1).
-This package covers both.
+## Static checker
 
-If your code uses typed keys, or you need checking inside `jit`, prefer the
-built-in flag. Use this package for raw keys in eager code.
+Reads source files without running them, so it also covers jitted functions.
 
-## Behavior
+- CLI: `jax-keyguard PATH...` (exit status 1 if anything is found).
+- flake8: installed automatically as code `KG001` (`flake8 --select KG`).
+- Python: `jax_keyguard.check_source(source)` returns `(line, col, message)` tuples.
+- Silence a line with `# noqa` (or `# noqa: KG001` under flake8).
 
-- Inside `key_reuse_guard()`, every public `jax.random` function whose first
-  parameter is `key` (samplers such as `normal`, `uniform`, `bernoulli`, ...,
-  and `split`) consumes that key. Passing an already consumed key raises
-  `KeyReuseError` (a `RuntimeError`), naming the function and source location
-  of the first use.
-- Not consuming: `fold_in` (so `fold_in(base, step)` in a loop is fine, as
-  with the built-in checker), `key`, `PRNGKey`, `key_data`, `wrap_key_data`,
-  `key_impl`, `clone`.
-- Detection is by value: a key is identified by its underlying data (plus the
-  PRNG implementation for typed keys). Two keys created from the same seed
-  count as the same key, which is usually a bug anyway.
-- Consumed state belongs to a single guard and is discarded on exit.
+Within each function it follows variables that hold keys: values returned by
+`jax.random.key`/`PRNGKey`/`split`/`fold_in`, and parameters the function
+passes to `jax.random`. A key is consumed when passed to a `jax.random`
+function (samplers and `split`; `fold_in` and `key_data` don't consume). It
+reports a key consumed twice, including across loop iterations, in
+comprehensions, and after either branch of an `if`.
 
-## Limitations
+Not seen: keys stored in attributes or containers (`self.key`, `keys[0]`),
+keys reused through helper functions (passing a key to your own function does
+not count as consuming it, since helpers often `fold_in` it), and closures.
 
-- Calls made while tracing (`jit`, `vmap`, `grad`, ...) are skipped silently,
-  because the key is an abstract tracer with no value. Use the built-in flag
-  with typed keys for traced code.
-- The guard works by temporarily replacing attributes on the `jax.random`
-  module. Names bound before entering the guard, e.g. via
-  `from jax.random import normal`, are not intercepted.
-- Patching module attributes is process-global and not thread-safe.
+## Runtime check
+
+Raises `KeyReuseError` when a key value is consumed twice, for both typed keys
+(`jax.random.key`) and raw keys (`jax.random.PRNGKey`). JAX's built-in
+`jax_debug_key_reuse` flag only checks typed keys.
+
+- pytest: `pytest --keyguard` checks the whole test session.
+- Anywhere: `jax_keyguard.enable()` / `jax_keyguard.disable()`, or
+  `with jax_keyguard.key_reuse_guard(): ...` for a block.
+
+Keys are identified by value, so two keys from the same seed count as the
+same key. Calls inside `jit`/`vmap`/`grad` are skipped (use the built-in flag
+with typed keys there). It works by patching `jax.random` functions, so names
+imported with `from jax.random import normal` before enabling are not
+checked, and it is not thread-safe.
 
 ## License
 

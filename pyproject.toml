@@ -4,19 +4,31 @@ build-backend = "hatchling.build"
 
 [project]
 name = "jax-keyguard"
-version = "0.1.0"
-description = "Detect JAX PRNG key reuse at runtime, for typed and legacy raw keys."
+version = "0.2.0"
+description = "Detect JAX PRNG key reuse statically from source, or at runtime."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["jax"]
-keywords = ["jax", "prng", "random", "debugging"]
+keywords = ["jax", "prng", "random", "linter", "flake8"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Intended Audience :: Science/Research",
     "Topic :: Software Development :: Debuggers",
+    "Topic :: Software Development :: Quality Assurance",
+    "Framework :: Flake8",
+    "Framework :: Pytest",
 ]
+
+[project.scripts]
+jax-keyguard = "jax_keyguard.static:main"
+
+[project.entry-points."flake8.extension"]
+KG = "jax_keyguard.static:Plugin"
+
+[project.entry-points.pytest11]
+keyguard = "jax_keyguard.pytest_plugin"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/jax_keyguard"]

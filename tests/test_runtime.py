@@ -11,7 +11,7 @@ def test_reuse_raises(make_key):
     key = make_key(0)
     with key_reuse_guard():
         jax.random.normal(key, (3,))
-        with pytest.raises(KeyReuseError, match=r"normal.*test_keyguard\.py:\d+"):
+        with pytest.raises(KeyReuseError, match=r"normal.*test_runtime\.py:\d+"):
             jax.random.uniform(key, (3,))
 
 
@@ -77,3 +77,29 @@ def test_state_is_per_guard():
     with key_reuse_guard():
         jax.random.normal(key)
 
+
+def test_enable_disable():
+    from jax_keyguard import disable, enable
+
+    key = jax.random.PRNGKey(0)
+    enable()
+    try:
+        jax.random.normal(key)
+        with pytest.raises(KeyReuseError):
+            jax.random.normal(key)
+    finally:
+        disable()
+    jax.random.normal(key)
+
+
+def test_pytest_flag(pytester):
+    pytester.makepyfile("""
+        import jax
+
+        def test_reuse():
+            key = jax.random.PRNGKey(0)
+            jax.random.normal(key)
+            jax.random.normal(key)
+    """)
+    pytester.runpytest().assert_outcomes(passed=1)
+    pytester.runpytest("--keyguard").assert_outcomes(failed=1)
