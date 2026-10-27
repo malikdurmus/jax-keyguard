@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jax-keyguard"
+version = "0.1.0"
+description = "Detect JAX PRNG key reuse at runtime, for typed and legacy raw keys."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = ["jax"]
+keywords = ["jax", "prng", "random", "debugging"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Intended Audience :: Science/Research",
+    "Topic :: Software Development :: Debuggers",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jax_keyguard"]
