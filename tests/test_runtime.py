@@ -103,3 +103,79 @@ def test_pytest_flag(pytester):
     """)
     pytester.runpytest().assert_outcomes(passed=1)
     pytester.runpytest("--keyguard").assert_outcomes(failed=1)
+
+
+@pytest.mark.parametrize("make_key", KEY_MAKERS)
+def test_closed_over_key_under_tracing_is_skipped(make_key):
+    import jax.numpy as jnp
+
+    key = make_key(0)
+    f = jax.jit(lambda x: x + jax.random.normal(key, x.shape))
+    g = jax.grad(lambda x: x * jax.random.normal(key))
+    with key_reuse_guard():
+        f(jnp.ones(3))
+        f(jnp.ones(4))  # retrace
+        g(1.0)
+        g(2.0)
+
+
+def test_reset():
+    from jax_keyguard import reset
+
+    key = jax.random.PRNGKey(0)
+    with key_reuse_guard():
+        jax.random.normal(key)
+        reset()
+        jax.random.normal(key)
+
+
+def test_pytest_flag_is_per_test(pytester):
+    pytester.makepyfile("""
+        import jax, jax_keyguard, pytest
+
+        def test_one():
+            jax.random.normal(jax.random.PRNGKey(0))
+
+        def test_two():
+            jax.random.normal(jax.random.PRNGKey(0))
+
+        @pytest.mark.parametrize("n", [1, 2, 3])
+        def test_param(n):
+            jax.random.uniform(jax.random.key(42), (n,))
+
+        def test_disables():
+            jax_keyguard.disable()
+
+        def test_still_checked():
+            key = jax.random.PRNGKey(1)
+            jax.random.normal(key)
+            jax.random.normal(key)
+    """)
+    result = pytester.runpytest("--keyguard")
+    result.assert_outcomes(passed=6, failed=1)
+    result.stdout.fnmatch_lines(["FAILED *test_still_checked*"])
+
+
+def test_dir_lists_public_api():
+    import jax_keyguard
+
+    assert {"check_source", "enable", "disable", "reset", "key_reuse_guard", "KeyReuseError"} <= set(dir(jax_keyguard))
+
+
+def test_captured_names_stop_checking_after_disable():
+    with key_reuse_guard():
+        from jax.random import normal
+    key = jax.random.key(0)
+    normal(key)
+    normal(key)
+
+
+def test_raw_and_typed_forms_match():
+    with key_reuse_guard():
+        jax.random.normal(jax.random.key(3))
+        with pytest.raises(KeyReuseError):
+            jax.random.normal(jax.random.PRNGKey(3))
+        k = jax.random.key(4)
+        jax.random.normal(k)
+        with pytest.raises(KeyReuseError):
+            jax.random.normal(jax.random.key_data(k))

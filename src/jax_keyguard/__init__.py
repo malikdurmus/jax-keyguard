@@ -1,6 +1,6 @@
 """Detect JAX PRNG key reuse, statically from source or at runtime."""
 
-__all__ = ["KeyReuseError", "check_source", "disable", "enable", "key_reuse_guard"]
+__all__ = ["KeyReuseError", "check_source", "disable", "enable", "key_reuse_guard", "reset"]
 __version__ = "0.2.0"
 
 
@@ -15,3 +15,7 @@ def __getattr__(name):
 
         return getattr(runtime, name)
     raise AttributeError(f"module 'jax_keyguard' has no attribute {name!r}")
+
+
+def __dir__():
+    return [*__all__, "__version__"]

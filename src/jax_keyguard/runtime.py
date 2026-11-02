@@ -6,6 +6,7 @@ import contextlib
 import functools
 import inspect
 import sys
+import warnings
 
 import jax
 import jax.random
@@ -38,24 +39,48 @@ def _consuming_functions() -> list[str]:
     return names
 
 
+try:
+    from jax._src.core import trace_state_clean as _not_tracing
+except ImportError:  # private API; fall back to checking for tracers only
+    warnings.warn(
+        "jax_keyguard can't tell when JAX is tracing in this JAX version, so a "
+        "concrete key closed over by a jitted function may be reported as reused "
+        "when the function is retraced.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+
+    def _not_tracing():
+        return True
+
+
 def _fingerprint(key):
-    """Hashable fingerprint of a concrete key's value, or None if not checkable."""
-    if isinstance(key, jax.core.Tracer):
+    """Hashable fingerprint of a concrete key's value, or None if not checkable.
+
+    Raw keys are compared as the typed keys they stand for, so key(0),
+    PRNGKey(0) and key_data(key(0)) all count as the same key.
+    """
+    # While tracing (jit, grad, scan, ...) the call runs once per trace, not once
+    # per execution, so even a concrete key closed over by the function is skipped.
+    if isinstance(key, jax.core.Tracer) or not _not_tracing():
         return None
-    if isinstance(key, jax.Array) and jax.dtypes.issubdtype(key.dtype, jax.dtypes.prng_key):
-        data = np.asarray(jax.random.key_data(key))
-        impl = str(jax.random.key_impl(key))
-        return ("typed", impl, key.shape, data.tobytes())
-    try:
-        data = np.asarray(key)
-    except Exception:
+    if not (isinstance(key, jax.Array) and jax.dtypes.issubdtype(key.dtype, jax.dtypes.prng_key)):
+        try:
+            key = jax.random.wrap_key_data(key)
+        except Exception:
+            return None
+    data = jax.random.key_data(key)
+    if isinstance(data, jax.core.Tracer):
         return None
-    return ("raw", data.dtype.str, data.shape, data.tobytes())
+    data = np.asarray(data)
+    return (str(jax.random.key_impl(key)), data.shape, data.tobytes())
 
 
 def _wrap(name, original, consumed):
     @functools.wraps(original)
     def wrapper(key, *args, **kwargs):
+        if not _originals:  # checking is off, e.g. a name captured before disable()
+            return original(key, *args, **kwargs)
         fp = _fingerprint(key)
         if fp is not None and fp in consumed:
             first_fn, first_loc = consumed[fp]
@@ -84,6 +109,11 @@ def enable() -> None:
     for name in _consuming_functions():
         _originals[name] = getattr(jax.random, name)
         setattr(jax.random, name, _wrap(name, _originals[name], _consumed))
+
+
+def reset() -> None:
+    """Forget consumed keys without turning checking off."""
+    _consumed.clear()
 
 
 def disable() -> None:
