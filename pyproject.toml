@@ -21,6 +21,11 @@ classifiers = [
     "Framework :: Pytest",
 ]
 
+[project.urls]
+Homepage = "https://malikdurmus.github.io/jax-keyguard/"
+Repository = "https://github.com/malikdurmus/jax-keyguard"
+Issues = "https://github.com/malikdurmus/jax-keyguard/issues"
+
 [project.scripts]
 jax-keyguard = "jax_keyguard.static:main"
 

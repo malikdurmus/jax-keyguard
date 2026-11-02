@@ -1,7 +1,7 @@
 """Detect JAX PRNG key reuse, statically from source or at runtime."""
 
 __all__ = ["KeyReuseError", "check_source", "disable", "enable", "key_reuse_guard", "reset"]
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 
 def __getattr__(name):
