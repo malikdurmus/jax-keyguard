@@ -11,7 +11,23 @@ code or while it runs.
 pip install jax-keyguard
 ```
 
-Requires Python 3.10 or newer.
+Requires Python 3.10 or newer and JAX 0.4.18 or newer.
+
+## Why not JAX's own check?
+
+JAX 0.4.26 added a `jax_debug_key_reuse` option, but it only checks keys made
+with `jax.random.key`. Keys made with `jax.random.PRNGKey`, which most existing
+code and tutorials use, are not checked, even in the latest JAX. Use this
+package if:
+
+- your code uses `jax.random.PRNGKey` keys, on any JAX version,
+- you are on a JAX version older than 0.4.26, which has no check at all, or
+- you want to find reuse in CI without running the code. The static checker
+  only reads your source, so it works with any key type and any JAX version.
+
+If your code only uses `jax.random.key` keys on a recent JAX, turn on
+`jax_debug_key_reuse` for runtime checking. It also works inside `jit`, which
+the runtime check here does not. The static checker is still useful in CI.
 
 ## Checking your code
 
@@ -138,15 +154,11 @@ it reports a reuse that could happen on any path. A key used in a loop that
 only ever runs once, or in an `except` block that can't be reached, still
 counts. Add `# noqa` in those cases.
 
-Found a real one: running it on JAX's own repository turned up
-`jax/experimental/jax2tf/examples/mnist_lib.py`, which uses the same key for
-the weights and biases of every layer.
-
 ## Checking at runtime
 
 This raises `KeyReuseError` as soon as a key is used a second time. It works
-with both kinds of keys, `jax.random.key` and the older `jax.random.PRNGKey`.
-JAX's own `jax_debug_key_reuse` option only checks the first kind.
+with both kinds of keys, `jax.random.key` and the older `jax.random.PRNGKey`,
+on any supported JAX version.
 
 ### In tests
 
@@ -186,6 +198,15 @@ with jax_keyguard.key_reuse_guard():
   `scan` and so on, because that code runs once per trace rather than once per
   call. Use JAX's `jax_debug_key_reuse` with `jax.random.key` keys there, or
   rely on the static checker.
+- It slows down random calls. Each checked call copies the key back from the
+  device, which also stops JAX from dispatching work ahead asynchronously. A
+  loop of `split` and `normal` on CPU ran about twice as slowly with checking
+  on. It is meant for tests and debugging, not for full training runs.
+- It remembers every key used since checking was turned on (or since the last
+  `reset()`), so memory grows by a little with each random call. That is fine
+  in tests, where `--keyguard` resets before each test. In a long script, call
+  `jax_keyguard.reset()` now and then, for example once per epoch, keeping in
+  mind that reuse across a reset is not caught.
 - It works by replacing the functions on the `jax.random` module. A name
   imported earlier with `from jax.random import normal` is not checked.
 - Reuse inside a `jax.pure_callback` shows up as an XLA error that wraps the
